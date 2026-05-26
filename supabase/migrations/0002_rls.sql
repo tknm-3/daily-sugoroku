@@ -21,54 +21,71 @@ alter table players enable row level security;
 alter table dice_rolls enable row level security;
 
 -- families: 自分の家族のみ参照。作成は誰でも可（サインアップ時）。
+drop policy if exists families_select on families;
 create policy families_select on families
   for select using (id = current_family_id());
+drop policy if exists families_insert on families;
 create policy families_insert on families
   for insert with check (true);
+drop policy if exists families_update on families;
 create policy families_update on families
   for update using (id = current_family_id());
 
 -- users: 同じ家族のメンバーを参照。自分のレコードのみ作成・更新。
+drop policy if exists users_select on users;
 create policy users_select on users
   for select using (family_id = current_family_id() or id = auth.uid());
+drop policy if exists users_insert on users;
 create policy users_insert on users
   for insert with check (id = auth.uid());
+drop policy if exists users_update on users;
 create policy users_update on users
   for update using (id = auth.uid());
 
 -- happening_events: マスターデータ。全員参照可。
+drop policy if exists happening_select on happening_events;
 create policy happening_select on happening_events
   for select using (true);
 
 -- wish_items: デフォルト(null) と自分の家族のもの。
+drop policy if exists wish_select on wish_items;
 create policy wish_select on wish_items
   for select using (family_id is null or family_id = current_family_id());
+drop policy if exists wish_write on wish_items;
 create policy wish_write on wish_items
   for all using (family_id = current_family_id())
   with check (family_id = current_family_id());
 
 -- diary_entries: 自分の家族のもの。書き込みは自分のレコードのみ。
+drop policy if exists diary_select on diary_entries;
 create policy diary_select on diary_entries
   for select using (family_id = current_family_id());
+drop policy if exists diary_insert on diary_entries;
 create policy diary_insert on diary_entries
   for insert with check (family_id = current_family_id() and user_id = auth.uid());
+drop policy if exists diary_update on diary_entries;
 create policy diary_update on diary_entries
   for update using (user_id = auth.uid());
+drop policy if exists diary_delete on diary_entries;
 create policy diary_delete on diary_entries
   for delete using (user_id = auth.uid());
 
 -- seasons: 自分の家族のもの。
+drop policy if exists seasons_select on seasons;
 create policy seasons_select on seasons
   for select using (family_id = current_family_id());
+drop policy if exists seasons_write on seasons;
 create policy seasons_write on seasons
   for all using (family_id = current_family_id())
   with check (family_id = current_family_id());
 
 -- players: 自分の家族のシーズンに属するもの。
+drop policy if exists players_select on players;
 create policy players_select on players
   for select using (
     season_id in (select id from seasons where family_id = current_family_id())
   );
+drop policy if exists players_write on players;
 create policy players_write on players
   for all using (
     season_id in (select id from seasons where family_id = current_family_id())
@@ -78,10 +95,12 @@ create policy players_write on players
   );
 
 -- dice_rolls: 自分の家族のシーズンに属するもの。
+drop policy if exists dice_select on dice_rolls;
 create policy dice_select on dice_rolls
   for select using (
     season_id in (select id from seasons where family_id = current_family_id())
   );
+drop policy if exists dice_insert on dice_rolls;
 create policy dice_insert on dice_rolls
   for insert with check (
     season_id in (select id from seasons where family_id = current_family_id())
