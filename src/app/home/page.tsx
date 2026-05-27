@@ -13,19 +13,20 @@ export default async function HomePage() {
 
   const supabase = await createClient();
 
-  const { data: family } = await supabase
-    .from("families")
-    .select("*")
-    .eq("id", profile.family_id)
-    .maybeSingle<Family>();
-
-  const { data: season } = await supabase
-    .from("seasons")
-    .select("*")
-    .eq("family_id", profile.family_id)
-    .order("start_date", { ascending: false })
-    .limit(1)
-    .maybeSingle<Season>();
+  const [{ data: family }, { data: season }] = await Promise.all([
+    supabase
+      .from("families")
+      .select("*")
+      .eq("id", profile.family_id)
+      .maybeSingle<Family>(),
+    supabase
+      .from("seasons")
+      .select("*")
+      .eq("family_id", profile.family_id)
+      .order("start_date", { ascending: false })
+      .limit(1)
+      .maybeSingle<Season>(),
+  ]);
 
   const stage = stageForPoints(profile.nobi_points);
 

@@ -31,15 +31,22 @@ export default async function BoardPage() {
     );
   }
 
-  const { data: members } = await supabase
-    .from("users")
-    .select("id, name_ja, avatar_emoji")
-    .eq("family_id", profile.family_id);
-
-  const { data: playerRows } = await supabase
-    .from("players")
-    .select("user_id, position, finished_at")
-    .eq("season_id", season.id);
+  const [{ data: members }, { data: playerRows }, { data: wishRows }] =
+    await Promise.all([
+      supabase
+        .from("users")
+        .select("id, name_ja, avatar_emoji")
+        .eq("family_id", profile.family_id),
+      supabase
+        .from("players")
+        .select("user_id, position, finished_at")
+        .eq("season_id", season.id),
+      supabase
+        .from("wish_items")
+        .select("text_ja, family_id, is_active")
+        .or(`family_id.is.null,family_id.eq.${profile.family_id}`)
+        .eq("is_active", true),
+    ]);
 
   const positionByUser = new Map(
     (playerRows ?? []).map((p) => [p.user_id, p]),
@@ -54,12 +61,6 @@ export default async function BoardPage() {
       finished: !!positionByUser.get(m.id)?.finished_at,
     }),
   );
-
-  const { data: wishRows } = await supabase
-    .from("wish_items")
-    .select("text_ja, family_id, is_active")
-    .or(`family_id.is.null,family_id.eq.${profile.family_id}`)
-    .eq("is_active", true);
 
   const wishes = ((wishRows ?? []) as Pick<WishItem, "text_ja">[]).map(
     (w) => w.text_ja,
