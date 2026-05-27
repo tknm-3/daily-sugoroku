@@ -20,30 +20,44 @@ export default function TopPage() {
     setMessage(null);
     const supabase = createClient();
 
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("timeout")), 10000),
+    );
+
     try {
       if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: `${location.origin}/auth/callback?next=/family/setup`,
-          },
-        });
+        const { error } = await Promise.race([
+          supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              emailRedirectTo: `${location.origin}/auth/callback?next=/family/setup`,
+            },
+          }),
+          timeout,
+        ]);
         if (error) {
           setMessage(error.message);
         } else {
           router.push("/family/setup");
         }
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await Promise.race([
+          supabase.auth.signInWithPassword({ email, password }),
+          timeout,
+        ]);
         if (error) {
           setMessage(error.message);
         } else {
           router.push("/home");
         }
       }
-    } catch {
-      setMessage("エラーが発生しました。もう一度お試しください。");
+    } catch (err) {
+      if (err instanceof Error && err.message === "timeout") {
+        setMessage("サーバーに接続できませんでした。時間をおいて再度お試しください。");
+      } else {
+        setMessage("エラーが発生しました。もう一度お試しください。");
+      }
     } finally {
       setLoading(false);
     }
