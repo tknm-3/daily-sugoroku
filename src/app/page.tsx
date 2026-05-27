@@ -21,9 +21,17 @@ export default function TopPage() {
     const supabase = createClient();
 
     if (mode === "signup") {
-      const { error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${location.origin}/auth/callback?next=/family/setup`,
+        },
+      });
       if (error) {
         setMessage(error.message);
+      } else if (!data.session) {
+        setMessage("確認メールを送りました。メールのリンクをクリックして登録を完了してください。");
       } else {
         router.push("/family/setup");
       }
