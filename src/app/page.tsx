@@ -20,22 +20,33 @@ export default function TopPage() {
     setMessage(null);
     const supabase = createClient();
 
-    if (mode === "signup") {
-      const { error } = await supabase.auth.signUp({ email, password });
-      if (error) {
-        setMessage(error.message);
+    try {
+      if (mode === "signup") {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            emailRedirectTo: `${location.origin}/auth/callback?next=/family/setup`,
+          },
+        });
+        if (error) {
+          setMessage(error.message);
+        } else {
+          router.push("/family/setup");
+        }
       } else {
-        router.push("/family/setup");
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) {
+          setMessage(error.message);
+        } else {
+          router.push("/home");
+        }
       }
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        setMessage(error.message);
-      } else {
-        router.push("/home");
-      }
+    } catch {
+      setMessage("エラーが発生しました。もう一度お試しください。");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   return (
