@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getTheme } from "@/lib/themes";
-import { describeEffect } from "@/lib/effects";
+import { cellInfo, CELL_LEGEND } from "@/lib/cellInfo";
+import { sound } from "@/lib/sound";
 import {
   clampPosition,
   isGoal,
@@ -38,6 +39,8 @@ export default function BoardGame({ seasonId, themeId, board, players: initial, 
   const theme = getTheme(themeId);
   const last = lastIndex(board);
 
+  const [started, setStarted] = useState(false);
+  const [muted, setMuted] = useState(false);
   const [players, setPlayers] = useState<PlayerView[]>(initial);
   const [turnIndex, setTurnIndex] = useState(0);
   const [dice, setDice] = useState<number | null>(null);
@@ -45,6 +48,11 @@ export default function BoardGame({ seasonId, themeId, board, players: initial, 
   const [message, setMessage] = useState<string>("サイコロを ふってね！");
   const [skipFlags, setSkipFlags] = useState<Set<string>>(new Set());
   const [extraRoll, setExtraRoll] = useState(false);
+
+  // 演出用
+  const [flashCell, setFlashCell] = useState<number | null>(null);
+  const [poppedUser, setPoppedUser] = useState<string | null>(null);
+  const [detailCell, setDetailCell] = useState<BoardCell | null>(null);
 
   // 発動中の効果モーダル
   const [wishText, setWishText] = useState<string | null>(null);
@@ -55,7 +63,18 @@ export default function BoardGame({ seasonId, themeId, board, players: initial, 
   const current = players[turnIndex];
   const allFinished = players.every((p) => p.finished);
   const winner = players.find((p) => p.finished);
-  const modalOpen = wishText !== null || swapForUser !== null || freeMoveForUser !== null;
+  const modalOpen =
+    wishText !== null || swapForUser !== null || freeMoveForUser !== null;
+
+  useEffect(() => {
+    setMuted(sound.isMuted());
+    return () => sound.stopBgm();
+  }, []);
+
+  // ゴール時のファンファーレ
+  useEffect(() => {
+    if (started && allFinished) sound.sfx("fanfare");
+  }, [started, allFinished]);
 
   function setPos(userId: string, pos: number, finished?: boolean) {
     setPlayers((prev) =>
@@ -76,6 +95,52 @@ export default function BoardGame({ seasonId, themeId, board, players: initial, 
       })
       .eq("season_id", seasonId)
       .eq("user_id", userId);
+  }
+
+  // 「ゲームをはじめる」: 全員をスタートに戻してから遊び始める。
+  async function startGame() {
+    sound.resume();
+    sound.sfx("fanfare");
+    sound.startBgm(themeId);
+    setMuted(sound.isMuted());
+
+    setPlayers((prev) => prev.map((p) => ({ ...p, position: 0, finished: false })));
+    setTurnIndex(0);
+    setSkipFlags(new Set());
+    setDice(null);
+    setExtraRoll(false);
+    setMessage("サイコロを ふってね！");
+    setStarted(true);
+
+    await supabase
+      .from("players")
+      .update({ position: 0, finished_at: null })
+      .eq("season_id", seasonId);
+    await supabase
+      .from("seasons")
+      .update({ status: "playing" })
+      .eq("id", seasonId);
+  }
+
+  function toggleMute() {
+    const isMuted = sound.toggleMute();
+    setMuted(isMuted);
+    if (!isMuted) {
+      sound.resume();
+      sound.startBgm(themeId);
+      sound.sfx("tap");
+    } else {
+      sound.stopBgm();
+    }
+  }
+
+  function flash(pos: number, userId: string) {
+    setFlashCell(pos);
+    setPoppedUser(userId);
+    setTimeout(() => {
+      setFlashCell(null);
+      setPoppedUser(null);
+    }, 600);
   }
 
   function nextTurnIndex(fromIndex: number, flags: Set<string>): number {
@@ -114,6 +179,7 @@ export default function BoardGame({ seasonId, themeId, board, players: initial, 
   async function handleRoll() {
     if (rolling || modalOpen || allFinished || !current) return;
     setRolling(true);
+    sound.sfx("dice");
 
     // 演出用に数回パラパラさせる
     for (let i = 0; i < 8; i++) {
@@ -131,6 +197,12 @@ export default function BoardGame({ seasonId, themeId, board, players: initial, 
 
     // まず止まったマスへ移動を反映
     setPos(current.user_id, res.newPosition);
+    sound.sfx("move");
+    flash(res.newPosition, current.user_id);
+
+    // マスの効果音（場面ごとに変わる）
+    const reachedGoal = isGoal(res.newPosition, board);
+    setTimeout(() => sound.sfx(reachedGoal ? "goal" : cellInfo(cell).sfx), 280);
 
     // 全員移動
     if (res.moveAllBy !== null) {
@@ -162,7 +234,7 @@ export default function BoardGame({ seasonId, themeId, board, players: initial, 
       },
     });
 
-    setMessage(cellMessage(cell, res.effect_type, res.effect_value));
+    setMessage(cellMessage(cell, res.effect_type));
 
     // 休みフラグ
     const flags = new Set(skipFlags);
@@ -210,6 +282,7 @@ export default function BoardGame({ seasonId, themeId, board, players: initial, 
   }
 
   async function closeWish() {
+    sound.sfx("wish");
     const userId = swapForUser ?? freeMoveForUser ?? current?.user_id;
     setWishText(null);
     if (userId) await afterInteractive(userId);
@@ -217,12 +290,14 @@ export default function BoardGame({ seasonId, themeId, board, players: initial, 
 
   async function chooseSwap(targetId: string) {
     if (!swapForUser) return;
+    sound.sfx("swap");
     const me = players.find((p) => p.user_id === swapForUser)!;
     const target = players.find((p) => p.user_id === targetId)!;
     const myPos = me.position;
     const targetPos = target.position;
     setPos(me.user_id, targetPos);
     setPos(target.user_id, myPos);
+    flash(targetPos, me.user_id);
     await persistPosition(me.user_id, targetPos, isGoal(targetPos, board));
     await persistPosition(target.user_id, myPos, isGoal(myPos, board));
     const uid = swapForUser;
@@ -232,7 +307,9 @@ export default function BoardGame({ seasonId, themeId, board, players: initial, 
 
   async function chooseFreeMove(pos: number) {
     if (!freeMoveForUser) return;
+    sound.sfx("forward");
     setPos(freeMoveForUser, pos);
+    flash(pos, freeMoveForUser);
     const reached = await finalizeGoalIfNeeded(freeMoveForUser, pos);
     const uid = freeMoveForUser;
     setFreeMoveForUser(null);
@@ -250,43 +327,75 @@ export default function BoardGame({ seasonId, themeId, board, players: initial, 
   }
 
   return (
-    <main className={`min-h-dvh bg-gradient-to-br ${theme.gradient} p-4`}>
+    <main className={`min-h-dvh bg-gradient-to-br ${theme.gradient} bg-animated p-4`}>
       <div className="mx-auto flex max-w-md flex-col gap-4">
         <header className="flex items-center justify-between">
           <h1 className="text-lg font-extrabold text-stone-700">
             {theme.emoji} {theme.name}
           </h1>
-          <button
-            onClick={() => router.push("/home")}
-            className="rounded-2xl bg-white/70 px-3 py-1 text-sm font-bold"
-          >
-            ホーム
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleMute}
+              aria-label={muted ? "音を つける" : "音を けす"}
+              className="rounded-2xl bg-white/70 px-3 py-1 text-lg"
+            >
+              {muted ? "🔇" : "🔊"}
+            </button>
+            <button
+              onClick={() => {
+                sound.sfx("tap");
+                router.push("/home");
+              }}
+              className="rounded-2xl bg-white/70 px-3 py-1 text-sm font-bold"
+            >
+              ホーム
+            </button>
+          </div>
         </header>
 
-        <BoardGrid board={board} players={players} />
+        <BoardGrid
+          board={board}
+          players={players}
+          flashCell={flashCell}
+          poppedUser={poppedUser}
+          currentUserId={current?.user_id}
+          onCellTap={(c) => {
+            sound.sfx("tap");
+            setDetailCell(c);
+          }}
+        />
+
+        <Legend />
 
         <div className="rounded-3xl bg-white/85 p-4 text-center shadow">
           {allFinished ? (
             <div className="flex flex-col items-center gap-2">
-              <p className="text-2xl font-extrabold text-rose-600">🎉 ゴール！</p>
+              <p className="pop-in text-3xl font-extrabold text-rose-600">🎉 ゴール！</p>
               <p>{theme.goalMessage}</p>
               {winner && (
                 <p className="font-bold">
                   1ばんは {winner.avatar_emoji} {winner.name_ja}！
                 </p>
               )}
-              <button onClick={() => router.push("/home")} className="btn-pop bg-rose-500 text-white">
+              <button
+                onClick={() => {
+                  sound.sfx("tap");
+                  router.push("/home");
+                }}
+                className="btn-pop bg-rose-500 text-white"
+              >
                 ホームへ もどる
               </button>
             </div>
           ) : (
             <>
               <p className="text-sm text-stone-500">いまの ばん</p>
-              <p className="text-xl font-extrabold">
+              <p className="animate-bob text-xl font-extrabold">
                 {current?.avatar_emoji} {current?.name_ja}
               </p>
-              <div className="my-2 text-6xl">{dice ? DICE_FACES[dice] : "🎲"}</div>
+              <div className={`my-2 text-6xl ${rolling ? "dice-rolling" : ""}`}>
+                {dice ? DICE_FACES[dice] : "🎲"}
+              </div>
               <p className="min-h-6 text-sm font-bold text-stone-700">{message}</p>
               <button
                 onClick={handleRoll}
@@ -299,6 +408,16 @@ export default function BoardGame({ seasonId, themeId, board, players: initial, 
           )}
         </div>
       </div>
+
+      {!started && (
+        <StartOverlay theme={theme} onStart={startGame} />
+      )}
+
+      {allFinished && started && <Confetti />}
+
+      {detailCell && (
+        <CellDetail cell={detailCell} onClose={() => setDetailCell(null)} />
+      )}
 
       {wishText && (
         <Modal title="🎁 ちいさな おねがい">
@@ -346,20 +465,31 @@ export default function BoardGame({ seasonId, themeId, board, players: initial, 
   );
 }
 
-function cellMessage(cell: BoardCell, effectType: BoardCell["effect_type"], value: number | null): string {
-  const head =
-    cell.type === "happening" && cell.title
-      ? `${cell.emoji ?? ""} ${cell.title}`
-      : cell.type === "diary"
-        ? "📔 日記マス"
-        : cell.type === "wish"
-          ? "🎁 おねがいマス"
-          : "";
-  if (!effectType || effectType === "NONE") return head || "そのまま！";
-  return `${head} → ${describeEffect(effectType, value)}`.trim();
+function cellMessage(cell: BoardCell, effectType: BoardCell["effect_type"]): string {
+  const info = cellInfo(cell);
+  if (!effectType || effectType === "NONE") {
+    return cell.type === "diary" || cell.type === "happening" || cell.type === "wish"
+      ? info.detail
+      : "そのまま！";
+  }
+  return info.detail;
 }
 
-function BoardGrid({ board, players }: { board: Board; players: PlayerView[] }) {
+function BoardGrid({
+  board,
+  players,
+  flashCell,
+  poppedUser,
+  currentUserId,
+  onCellTap,
+}: {
+  board: Board;
+  players: PlayerView[];
+  flashCell: number | null;
+  poppedUser: string | null;
+  currentUserId?: string;
+  onCellTap: (cell: BoardCell) => void;
+}) {
   const tokensByCell = new Map<number, PlayerView[]>();
   for (const p of players) {
     const arr = tokensByCell.get(p.position) ?? [];
@@ -369,49 +499,144 @@ function BoardGrid({ board, players }: { board: Board; players: PlayerView[] }) 
 
   return (
     <div className="grid grid-cols-5 gap-1.5 rounded-3xl bg-white/50 p-2">
-      {board.map((cell) => (
-        <div
-          key={cell.index}
-          className="relative flex aspect-square flex-col items-center justify-center rounded-xl bg-white/80 text-center"
-        >
-          <span className="absolute left-1 top-0.5 text-[9px] text-stone-400">
-            {cell.index}
-          </span>
-          <span className="text-lg leading-none">{cellIcon(cell)}</span>
-          <div className="absolute -bottom-1 flex flex-wrap justify-center">
-            {(tokensByCell.get(cell.index) ?? []).map((p) => (
-              <span key={p.user_id} className="text-base drop-shadow">
-                {p.avatar_emoji}
-              </span>
-            ))}
-          </div>
-        </div>
+      {board.map((cell) => {
+        const info = cellInfo(cell);
+        const isFlash = flashCell === cell.index;
+        return (
+          <button
+            key={cell.index}
+            onClick={() => onCellTap(cell)}
+            className={`relative flex aspect-square flex-col items-center justify-center rounded-xl text-center ${info.cellClass} ${isFlash ? "cell-flash" : ""}`}
+          >
+            <span className="absolute left-1 top-0.5 text-[9px] text-stone-400">
+              {cell.index}
+            </span>
+            <span className="text-lg leading-none">{info.icon}</span>
+            <div className="absolute -bottom-1 flex flex-wrap justify-center">
+              {(tokensByCell.get(cell.index) ?? []).map((p) => (
+                <span
+                  key={p.user_id}
+                  className={`text-base drop-shadow ${
+                    poppedUser === p.user_id ? "token-pop" : ""
+                  } ${currentUserId === p.user_id ? "animate-bob" : ""}`}
+                >
+                  {p.avatar_emoji}
+                </span>
+              ))}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const LEGEND_DOT: Record<string, string> = {
+  good: "bg-emerald-400",
+  bad: "bg-rose-400",
+  special: "bg-violet-400",
+  neutral: "bg-stone-300",
+};
+
+function Legend() {
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-2xl bg-white/70 px-3 py-2 text-[11px] font-bold text-stone-600">
+      <span className="text-stone-400">マスをタップで くわしく！</span>
+      {CELL_LEGEND.map((l) => (
+        <span key={l.mood} className="flex items-center gap-1">
+          <span className={`inline-block h-3 w-3 rounded-full ${LEGEND_DOT[l.mood]}`} />
+          {l.label}
+        </span>
       ))}
     </div>
   );
 }
 
-function cellIcon(cell: BoardCell): string {
-  switch (cell.type) {
-    case "start":
-      return "🏁";
-    case "goal":
-      return "🎉";
-    case "diary":
-      return "📔";
-    case "wish":
-      return "🎁";
-    case "happening":
-      return cell.emoji ?? "❓";
-    default:
-      return "";
-  }
+function CellDetail({ cell, onClose }: { cell: BoardCell; onClose: () => void }) {
+  const info = cellInfo(cell);
+  return (
+    <div
+      className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-6"
+      onClick={onClose}
+    >
+      <div
+        className="pop-in flex w-full max-w-xs flex-col items-center gap-3 rounded-3xl bg-white p-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span className="text-5xl">{info.icon}</span>
+        <span className={`rounded-full px-3 py-0.5 text-sm font-bold ${info.badgeClass}`}>
+          {info.label}
+        </span>
+        <p className="text-center text-base font-bold text-stone-700">{info.detail}</p>
+        <button onClick={onClose} className="btn-pop bg-stone-200 text-base">
+          とじる
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function StartOverlay({
+  theme,
+  onStart,
+}: {
+  theme: ReturnType<typeof getTheme>;
+  onStart: () => void;
+}) {
+  return (
+    <div
+      className={`fixed inset-0 z-30 flex flex-col items-center justify-center gap-6 bg-gradient-to-br ${theme.gradient} bg-animated p-8`}
+    >
+      <div className="pop-in flex flex-col items-center gap-3 text-center">
+        <span className="text-7xl">{theme.emoji}</span>
+        <h2 className="text-2xl font-extrabold text-stone-700">{theme.name}</h2>
+        <p className="text-sm font-bold text-stone-600">
+          みんな スタートから よーい どん！
+        </p>
+      </div>
+      <button onClick={onStart} className="btn-pop animate-bob bg-rose-500 text-2xl text-white">
+        🎲 ゲームを はじめる！
+      </button>
+    </div>
+  );
+}
+
+const CONFETTI_COLORS = ["#f87171", "#fbbf24", "#34d399", "#60a5fa", "#a78bfa", "#f472b6"];
+
+function Confetti() {
+  const pieces = useMemo(
+    () =>
+      Array.from({ length: 40 }, (_, i) => ({
+        id: i,
+        left: Math.random() * 100,
+        delay: Math.random() * 2,
+        duration: 2.5 + Math.random() * 2,
+        color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+      })),
+    [],
+  );
+  return (
+    <div className="pointer-events-none fixed inset-0 z-20 overflow-hidden">
+      {pieces.map((p) => (
+        <span
+          key={p.id}
+          className="confetti-piece"
+          style={{
+            left: `${p.left}%`,
+            backgroundColor: p.color,
+            animationDelay: `${p.delay}s`,
+            animationDuration: `${p.duration}s`,
+          }}
+        />
+      ))}
+    </div>
+  );
 }
 
 function Modal({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/40 p-6">
-      <div className="flex w-full max-w-sm flex-col gap-4 rounded-3xl bg-white p-6 shadow-xl">
+      <div className="pop-in flex w-full max-w-sm flex-col gap-4 rounded-3xl bg-white p-6 shadow-xl">
         <h2 className="text-center text-lg font-extrabold text-rose-700">{title}</h2>
         {children}
       </div>
