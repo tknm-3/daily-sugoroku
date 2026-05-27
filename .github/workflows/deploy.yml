@@ -15,7 +15,22 @@ env:
   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
 jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Apply Supabase migrations
+        run: supabase db push --db-url "${{ secrets.SUPABASE_DB_URL }}"
+
   deploy:
+    needs: migrate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
