@@ -1,20 +1,20 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getCurrentProfile } from "@/lib/auth";
+import { getUserId } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import BoardGame, { type PlayerView } from "./BoardGame";
 import type { Board, Season, User, WishItem } from "@/lib/types";
 
 export default async function BoardPage() {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/family/setup");
+  const userId = await getUserId();
+  if (!userId) redirect("/");
 
   const supabase = await createClient();
 
+  // RLS で自分の家族のシーズンに絞られる。
   const { data: season } = await supabase
     .from("seasons")
     .select("*")
-    .eq("family_id", profile.family_id)
     .in("status", ["playing", "finished"])
     .order("start_date", { ascending: false })
     .limit(1)
@@ -31,12 +31,10 @@ export default async function BoardPage() {
     );
   }
 
+  // members / wish_items も RLS で自分の家族に絞られる。
   const [{ data: members }, { data: playerRows }, { data: wishRows }] =
     await Promise.all([
-      supabase
-        .from("users")
-        .select("id, name_ja, avatar_emoji")
-        .eq("family_id", profile.family_id),
+      supabase.from("users").select("id, name_ja, avatar_emoji"),
       supabase
         .from("players")
         .select("user_id, position, finished_at")
@@ -44,7 +42,6 @@ export default async function BoardPage() {
       supabase
         .from("wish_items")
         .select("text_ja, family_id, is_active")
-        .or(`family_id.is.null,family_id.eq.${profile.family_id}`)
         .eq("is_active", true),
     ]);
 

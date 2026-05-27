@@ -1,32 +1,32 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getCurrentProfile } from "@/lib/auth";
+import { getUserId } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { stageForPoints } from "@/lib/growth";
 import { getTheme } from "@/lib/themes";
 import GenerateBoardButton from "./GenerateBoardButton";
-import type { Family, Season } from "@/lib/types";
+import type { Family, Season, User } from "@/lib/types";
 
 export default async function HomePage() {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/family/setup");
+  const userId = await getUserId();
+  if (!userId) redirect("/");
 
   const supabase = await createClient();
 
-  const [{ data: family }, { data: season }] = await Promise.all([
-    supabase
-      .from("families")
-      .select("*")
-      .eq("id", profile.family_id)
-      .maybeSingle<Family>(),
-    supabase
-      .from("seasons")
-      .select("*")
-      .eq("family_id", profile.family_id)
-      .order("start_date", { ascending: false })
-      .limit(1)
-      .maybeSingle<Season>(),
-  ]);
+  // families / seasons は RLS で自分の家族に絞られるため、profile を待たず並列取得できる。
+  const [{ data: profile }, { data: family }, { data: season }] =
+    await Promise.all([
+      supabase.from("users").select("*").eq("id", userId).maybeSingle<User>(),
+      supabase.from("families").select("*").maybeSingle<Family>(),
+      supabase
+        .from("seasons")
+        .select("*")
+        .order("start_date", { ascending: false })
+        .limit(1)
+        .maybeSingle<Season>(),
+    ]);
+
+  if (!profile) redirect("/family/setup");
 
   const stage = stageForPoints(profile.nobi_points);
 

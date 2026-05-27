@@ -6,7 +6,13 @@ type CookieToSet = { name: string; value: string; options: CookieOptions };
 const PUBLIC_PATHS = ["/", "/auth", "/family/setup"];
 
 export async function updateSession(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request });
+  // クライアントが x-user-id を偽装して送り込むのを防ぐため、受信ヘッダから必ず除去する。
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.delete("x-user-id");
+
+  let supabaseResponse = NextResponse.next({
+    request: { headers: requestHeaders },
+  });
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -25,7 +31,9 @@ export async function updateSession(request: NextRequest) {
         cookiesToSet.forEach(({ name, value }) =>
           request.cookies.set(name, value),
         );
-        supabaseResponse = NextResponse.next({ request });
+        supabaseResponse = NextResponse.next({
+          request: { headers: requestHeaders },
+        });
         cookiesToSet.forEach(({ name, value, options }) =>
           supabaseResponse.cookies.set(name, value, options),
         );
@@ -33,6 +41,7 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
+  // getUser はトークン検証＋期限切れ時のリフレッシュを担うため middleware では必須。
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -53,6 +62,18 @@ export async function updateSession(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/home";
     return NextResponse.redirect(url);
+  }
+
+  // 検証済みの user id を下流のサーバコンポーネントへ渡し、getUser の二重呼び出しを防ぐ。
+  if (user) {
+    requestHeaders.set("x-user-id", user.id);
+    const headerResponse = NextResponse.next({
+      request: { headers: requestHeaders },
+    });
+    supabaseResponse.cookies.getAll().forEach((cookie) =>
+      headerResponse.cookies.set(cookie),
+    );
+    return headerResponse;
   }
 
   return supabaseResponse;
