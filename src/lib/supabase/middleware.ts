@@ -48,5 +48,12 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // ログイン済みユーザーがトップページを開いたらホームへリダイレクト
+  if (user && path === "/") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/home";
+    return NextResponse.redirect(url);
+  }
+
   return supabaseResponse;
 }
