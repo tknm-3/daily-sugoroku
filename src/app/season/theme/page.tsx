@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -54,9 +55,14 @@ export default function ThemeSelectPage() {
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-6 p-6">
-      <div>
-        <h1 className="text-2xl font-extrabold text-emerald-700">テーマを えらぼう</h1>
-        <p className="text-sm text-stone-500">こんしゅうの すごろくの せかいを えらんでね</p>
+      <div className="flex items-start gap-3">
+        <Link href="/home" className="mt-1 rounded-2xl bg-stone-100 px-3 py-2 font-bold text-stone-600">
+          ←
+        </Link>
+        <div>
+          <h1 className="text-2xl font-extrabold text-emerald-700">テーマを えらぼう</h1>
+          <p className="text-sm text-stone-500">こんしゅうの すごろくの せかいを えらんでね</p>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
