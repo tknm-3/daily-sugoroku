@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { generateInviteCode } from "@/lib/invite";
@@ -20,64 +20,114 @@ export default function FamilySetupPage() {
   const [role, setRole] = useState<Role>("child");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setIsAuthenticated(!!user);
+      setAuthChecked(true);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAuthenticated(!!session?.user);
+      setAuthChecked(true);
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const supabase = createClient();
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      router.push("/");
-      return;
-    }
+    try {
+      const supabase = createClient();
 
-    let familyId: string;
-
-    if (mode === "create") {
-      const code = generateInviteCode();
-      const { data, error: famErr } = await supabase
-        .from("families")
-        .insert({ name: familyName, invite_code: code })
-        .select("id")
-        .single();
-      if (famErr || !data) {
-        setError(famErr?.message ?? "かぞくグループを つくれませんでした");
-        setLoading(false);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setError("ログインが確認できませんでした。メールのリンクをクリックしてください。");
         return;
       }
-      familyId = data.id;
-    } else {
-      const { data, error: famErr } = await supabase
-        .from("families")
-        .select("id")
-        .eq("invite_code", inviteCode.toUpperCase())
-        .maybeSingle();
-      if (famErr || !data) {
-        setError("しょうたいコードが みつかりません");
-        setLoading(false);
+
+      let familyId: string;
+
+      if (mode === "create") {
+        const code = generateInviteCode();
+        const { data, error: famErr } = await supabase
+          .from("families")
+          .insert({ name: familyName, invite_code: code })
+          .select("id")
+          .single();
+        if (famErr || !data) {
+          setError(famErr?.message ?? "かぞくグループを つくれませんでした");
+          return;
+        }
+        familyId = data.id;
+      } else {
+        const { data, error: famErr } = await supabase
+          .from("families")
+          .select("id")
+          .eq("invite_code", inviteCode.toUpperCase())
+          .maybeSingle();
+        if (famErr || !data) {
+          setError("しょうたいコードが みつかりません");
+          return;
+        }
+        familyId = data.id;
+      }
+
+      const { error: userErr } = await supabase.from("users").insert({
+        id: user.id,
+        family_id: familyId,
+        name_ja: nameJa,
+        role,
+        avatar_emoji: avatar,
+      });
+      if (userErr) {
+        setError(userErr.message);
         return;
       }
-      familyId = data.id;
-    }
 
-    const { error: userErr } = await supabase.from("users").insert({
-      id: user.id,
-      family_id: familyId,
-      name_ja: nameJa,
-      role,
-      avatar_emoji: avatar,
-    });
-    if (userErr) {
-      setError(userErr.message);
+      router.push("/home");
+    } catch {
+      setError("エラーが発生しました。もう一度お試しください。");
+    } finally {
       setLoading(false);
-      return;
     }
+  }
 
-    router.push("/home");
+  if (!authChecked) {
+    return (
+      <main className="flex min-h-dvh items-center justify-center">
+        <p className="text-stone-400">よみこみ中...</p>
+      </main>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-6 p-6 text-center">
+        <div className="text-5xl">📬</div>
+        <h1 className="text-2xl font-extrabold text-rose-700">メールを かくにんしてね</h1>
+        <p className="text-stone-600">
+          とうろく用のメールを おくりました。<br />
+          メールのリンクをクリックすると<br />
+          つぎのステップに進めます。
+        </p>
+        <button
+          type="button"
+          onClick={() => router.push("/")}
+          className="mt-4 rounded-2xl bg-stone-100 px-6 py-3 font-bold text-stone-600"
+        >
+          トップにもどる
+        </button>
+      </main>
+    );
   }
 
   return (
