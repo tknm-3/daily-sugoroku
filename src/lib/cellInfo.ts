@@ -1,5 +1,5 @@
 import type { BoardCell, EffectType } from "./types";
-import { describeEffect } from "./effects";
+import { describeEffect, getMood } from "./effects";
 import type { SfxName } from "./sound";
 
 /** マスの大きな分類。色や雰囲気を決めるのに使う。 */
@@ -106,16 +106,22 @@ export function cellInfo(cell: BoardCell): CellInfo {
       mood = "goal";
       sfx = "goal";
       break;
-    case "diary":
-      icon = "📔";
-      label = "日記マス";
-      detail =
+    case "diary": {
+      const moodDef = cell.mood ? getMood(cell.mood) : undefined;
+      icon = moodDef?.emoji ?? "📔";
+      label = moodDef?.label ?? "日記マス";
+      const who = cell.user_avatar && cell.user_name
+        ? `${cell.user_avatar}${cell.user_name}の`
+        : "";
+      const effectDesc =
         cell.effect_type && cell.effect_type !== "NONE"
-          ? `みんなの 日記の マス！ ${describeEffect(cell.effect_type, cell.effect_value ?? null)}`
-          : "みんなの 日記の マス！";
+          ? describeEffect(cell.effect_type, cell.effect_value ?? null)
+          : "";
+      detail = [who, label, "マス！", effectDesc].filter(Boolean).join(" ");
       mood = cell.effect_type ? moodOfEffect(cell.effect_type) : "neutral";
       sfx = cell.effect_type ? sfxOfEffect(cell.effect_type) : "diary";
       break;
+    }
     case "wish":
       icon = "🎁";
       label = "おねがいマス";
