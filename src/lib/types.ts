@@ -42,6 +42,15 @@ export interface BoardCell {
   emoji?: string;
   effect_type?: EffectType;
   effect_value?: number | null;
+  // 日記マス用: 盤面生成時に埋め込む
+  mood?: Mood;
+  note_text?: string | null;
+  entry_date?: string;
+  location?: LocationId | null;
+  partner?: PartnerId | null;
+  activity?: ActivityId | null;
+  user_name?: string;
+  user_avatar?: string;
 }
 
 export type Board = BoardCell[];

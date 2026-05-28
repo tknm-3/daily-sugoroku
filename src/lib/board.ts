@@ -33,9 +33,11 @@ function randInt(min: number, max: number, rng: Rng): number {
 
 export interface GenerateBoardParams {
   /** 今週の日記（全件）。 */
-  diaryEntries: Pick<DiaryEntry, "id" | "effect_type" | "effect_value">[];
+  diaryEntries: Pick<DiaryEntry, "id" | "user_id" | "effect_type" | "effect_value" | "mood" | "note_text" | "entry_date" | "location" | "partner" | "activity">[];
   /** テーマに対応するハプニングイベント（DB から取得済み）。 */
   happenings: HappeningEvent[];
+  /** ユーザー情報マップ（user_id → 名前・アバター）。 */
+  users?: Map<string, { name_ja: string; avatar_emoji: string }>;
   /** ハプニングマス枚数（既定 10〜12）。 */
   happeningCount?: number;
   /** ちいさなおねがいマス枚数（既定 2〜3）。 */
@@ -49,13 +51,24 @@ export function generateBoard(params: GenerateBoardParams): Board {
   const happeningCount = params.happeningCount ?? randInt(10, 12, rng);
   const wishCount = params.wishCount ?? randInt(2, 3, rng);
 
-  const diaryCells: BoardCell[] = params.diaryEntries.map((e) => ({
-    index: 0,
-    type: "diary",
-    entry_id: e.id,
-    effect_type: e.effect_type ?? "NONE",
-    effect_value: e.effect_value ?? null,
-  }));
+  const diaryCells: BoardCell[] = params.diaryEntries.map((e) => {
+    const user = e.user_id ? params.users?.get(e.user_id) : undefined;
+    return {
+      index: 0,
+      type: "diary",
+      entry_id: e.id,
+      effect_type: e.effect_type ?? "NONE",
+      effect_value: e.effect_value ?? null,
+      mood: e.mood ?? undefined,
+      note_text: e.note_text,
+      entry_date: e.entry_date,
+      location: e.location,
+      partner: e.partner,
+      activity: e.activity,
+      user_name: user?.name_ja,
+      user_avatar: user?.avatar_emoji,
+    };
+  });
 
   const happeningCells: BoardCell[] = pickN(
     params.happenings,

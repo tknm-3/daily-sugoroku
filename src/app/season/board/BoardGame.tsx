@@ -15,6 +15,7 @@ import {
   rollDice,
 } from "@/lib/game";
 import type { Board, BoardCell, ThemeId } from "@/lib/types";
+import { LOCATIONS, PARTNERS, ACTIVITIES } from "@/lib/data/diaryOptions";
 
 export interface PlayerView {
   user_id: string;
@@ -70,6 +71,19 @@ export default function BoardGame({ seasonId, themeId, board, players: initial, 
     setMuted(sound.isMuted());
     return () => sound.stopBgm();
   }, []);
+
+  // 画面が非表示になったら BGM を停止し、戻ったら再開する
+  useEffect(() => {
+    function handleVisibility() {
+      if (document.hidden) {
+        sound.stopBgm();
+      } else if (started && !muted) {
+        sound.startBgm(themeId);
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [started, muted, themeId]);
 
   // ゴール時のファンファーレ
   useEffect(() => {
@@ -554,6 +568,11 @@ function Legend() {
 
 function CellDetail({ cell, onClose }: { cell: BoardCell; onClose: () => void }) {
   const info = cellInfo(cell);
+  const isDiary = cell.type === "diary";
+  const locDef = isDiary && cell.location ? LOCATIONS.find((l) => l.id === cell.location) : null;
+  const partDef = isDiary && cell.partner ? PARTNERS.find((p) => p.id === cell.partner) : null;
+  const actDef = isDiary && cell.activity ? ACTIVITIES.find((a) => a.id === cell.activity) : null;
+
   return (
     <div
       className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-6"
@@ -567,7 +586,45 @@ function CellDetail({ cell, onClose }: { cell: BoardCell; onClose: () => void })
         <span className={`rounded-full px-3 py-0.5 text-sm font-bold ${info.badgeClass}`}>
           {info.label}
         </span>
-        <p className="text-center text-base font-bold text-stone-700">{info.detail}</p>
+        {isDiary ? (
+          <div className="flex w-full flex-col gap-1 text-sm text-stone-700">
+            {cell.user_avatar && cell.user_name && (
+              <p className="text-center font-extrabold text-base">
+                {cell.user_avatar} {cell.user_name}
+              </p>
+            )}
+            {cell.entry_date && (
+              <p className="text-center text-stone-400 text-xs">{cell.entry_date}</p>
+            )}
+            <div className="flex flex-wrap justify-center gap-2 py-1">
+              {locDef && (
+                <span className="rounded-full bg-sky-100 px-3 py-1 font-bold">
+                  {locDef.emoji} {locDef.label}
+                </span>
+              )}
+              {partDef && (
+                <span className="rounded-full bg-rose-100 px-3 py-1 font-bold">
+                  {partDef.emoji} {partDef.label}
+                </span>
+              )}
+              {actDef && (
+                <span className="rounded-full bg-amber-100 px-3 py-1 font-bold">
+                  {actDef.emoji} {actDef.label}
+                </span>
+              )}
+            </div>
+            {cell.note_text && (
+              <p className="rounded-2xl bg-stone-50 px-3 py-2 text-center font-bold">
+                「{cell.note_text}」
+              </p>
+            )}
+            {cell.effect_type && cell.effect_type !== "NONE" && (
+              <p className="text-center font-bold text-violet-600">→ {info.detail.split("→")[1]?.trim() ?? info.detail}</p>
+            )}
+          </div>
+        ) : (
+          <p className="text-center text-base font-bold text-stone-700">{info.detail}</p>
+        )}
         <button onClick={onClose} className="btn-pop bg-stone-200 text-base">
           とじる
         </button>
